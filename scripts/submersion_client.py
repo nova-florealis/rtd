@@ -9,7 +9,12 @@ import lunar_tools as lt
 from rtd.utils.prompt_provider import PromptProviderMicrophone, PromptProviderTxtFile
 from rtd.utils.audio_detector import AudioDetector
 from rtd.utils.oscillators import Oscillator
+from rtd.utils.image_utils import gen_random_image
 import threading
+from dotenv import load_dotenv
+import os
+
+load_dotenv(override=True)
 
 if len(sys.argv) > 1 and sys.argv[1].lower() == "server":
     from rtd.sdxl_turbo.diffusion_engine import DiffusionEngine
@@ -26,204 +31,7 @@ from rtd.utils.compression_helpers import send_compressed, recv_compressed
 from rtd.utils.optical_flow import OpticalFlowEstimator
 from rtd.utils.posteffect import Posteffect
 
-###############################################################################
-# SubmersionServer
-###############################################################################
-class SubmersionServer:
-    def __init__(self, host="0.0.0.0", port=8189, device="cuda:0", do_diffusion=True, do_compile=True, bounce=False):
-        self.host = host
-        self.port = port
-        self.device = device
-        self.do_diffusion = do_diffusion
-        self.do_compile = do_compile
-        self.bounce = bounce  # If True, the server will simply echo back the received image without processing
-
-        # These dimensions match the submersion pipeline settings.
-        self.height_diffusion = int((384 + 96) * 1.0)
-        self.width_diffusion = int((512 + 128) * 1.0)
-
-        # Create and bind the server socket.
-        self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        # Disable Nagle's algorithm to reduce latency.
-        self.server_socket.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-        self.server_socket.bind((self.host, self.port))
-        self.server_socket.listen(5)
-        print(f"SubmersionServer listening on {self.host}:{self.port}")
-
-        if not self.bounce:
-            # Initialize image processing modules.
-            self.input_image_processor = InputImageProcessor(device=device)
-            self.input_image_processor.set_flip(do_flip=True, flip_axis=1)
-
-            self.acid_processor = AcidProcessor(
-                height_diffusion=self.height_diffusion,
-                width_diffusion=self.width_diffusion,
-                device=device,
-            )
-            # Dynamic processing is removed since postprocessing is now handled client‐side.
-            # self.dynamic_processor = DynamicProcessor()
-
-            # Removed optical flow and posteffect initializations from the server.
-            # self.opt_flow_estimator = OpticalFlowEstimator(use_ema=False)
-            # self.posteffect_processor = Posteffect()
-
-            self.de_img = DiffusionEngine(
-                hf_model="stabilityai/sdxl-turbo",
-                use_image2image=True,
-                height_diffusion_desired=self.height_diffusion,
-                width_diffusion_desired=self.width_diffusion,
-                do_compile=self.do_compile,
-                do_diffusion=self.do_diffusion,
-                device=device,
-            )
-
-            if self.do_diffusion:
-                self.em = EmbeddingsMixer(self.de_img.pipe)
-                init_prompt = 'Dancing people full of glowing neon nerve fibers and filamenets'
-                self.embeds = self.em.encode_prompt(init_prompt)
-                self.embeds_source = self.em.clone_embeddings(self.embeds)
-                self.embeds_target = self.em.clone_embeddings(self.embeds)
-                self.de_img.set_embeddings(self.embeds)
-                self.fract_blend_embeds = 1.0  # Start with fully blended embedding
-                self.transition_start_time = None
-
-            # Removed storage of last diffusion image as it is not needed here.
-            # self.last_diffused = None
-
-            self.fps_tracker = lt.FPSTracker()
-
-            print("Submersion server ready.")
-        else:
-            print("Bounce mode enabled: Server will echo the received image without processing.")
-
-    def recvall(self, sock, n):
-        """Helper: receive exactly n bytes from the socket."""
-        data = b""
-        while len(data) < n:
-            packet = sock.recv(n - len(data))
-            if not packet:
-                return None
-            data += packet
-        return data
-
-    def recv_msg(self, sock):
-        """Receive a length-prefixed message."""
-        raw_msglen = self.recvall(sock, 4)
-        if not raw_msglen:
-            return None
-        msglen = struct.unpack("!I", raw_msglen)[0]
-        return self.recvall(sock, msglen)
-
-    def send_msg(self, sock, msg):
-        """Send a length-prefixed message."""
-        msg = struct.pack("!I", len(msg)) + msg
-        sock.sendall(msg)
-
-    def handle_client(self, client_sock, addr):
-        print(f"Connected by {addr}")
-        while True:
-            try:
-                self.fps_tracker.start_segment("Receive Data")
-                data = self.recv_msg(client_sock)
-                if data is None:
-                    print("Client disconnected")
-                    break
-
-                # Unpickle the received payload.
-                payload = pickle.loads(data)
-
-                if not self.bounce:
-                    self.fps_tracker.start_segment("Process Prompts")
-                    mic_prompt = payload.get("mic_prompt")
-                    if mic_prompt and self.do_diffusion:
-                        print(f"New microphone prompt received: {mic_prompt}")
-                        self.transition_start_time = time.time()
-                        self.embeds_source = self.em.clone_embeddings(self.embeds)
-                        self.embeds_target = self.em.encode_prompt(mic_prompt)
-                        self.fract_blend_embeds = 0.0
-
-                    txt_file_prompt = payload.get("txt_file_prompt")
-                    if txt_file_prompt and self.do_diffusion:
-                        print(f"New text file prompt received: {txt_file_prompt}")
-                        self.transition_start_time = time.time()
-                        self.embeds_source = self.em.clone_embeddings(self.embeds)
-                        self.embeds_target = self.em.encode_prompt(txt_file_prompt)
-                        self.fract_blend_embeds = 0.0
-
-                    # Removed dynamic processor related processing.
-
-                print(f"Received payload: {payload}")
-
-                if self.bounce:
-                    self.fps_tracker.start_segment("Bounce Mode")
-                    img = recv_compressed(client_sock)
-                    if img is None:
-                        break
-                    send_compressed(client_sock, img, quality=90)
-                    continue
-
-                print("Received payload")
-
-                self.fps_tracker.start_segment("Receive Image")
-                print("Waiting for compressed image from client...")
-                img_cam = recv_compressed(client_sock)
-                if img_cam is None:
-                    print("Client disconnected during image receive")
-                    break
-                if not isinstance(img_cam, np.ndarray):
-                    print(f"Invalid image received: {type(img_cam)}")
-                    continue
-
-                print("Received image")
-
-                self.fps_tracker.start_segment("Input Image Processing")
-                self.input_image_processor.set_human_seg(payload.get("do_human_seg", True))
-                self.input_image_processor.set_resizing_factor_humanseg(0.4)
-                self.input_image_processor.set_blur(payload.get("do_blur", False))
-                self.input_image_processor.set_brightness(payload.get("brightness", 1.0))
-                self.input_image_processor.set_infrared_colorize(payload.get("do_infrared_colorize", False))
-                img_proc, human_seg_mask = self.input_image_processor.process(img_cam.copy())
-
-                if not payload.get("do_human_seg", True):
-                    human_seg_mask = np.ones_like(img_proc).astype(np.float32) / 255
-
-                self.fps_tracker.start_segment("Acid Processing")
-                self.acid_processor.set_acid_strength(payload.get("acid_strength", 0.11))
-                self.acid_processor.set_coef_noise(payload.get("coef_noise", 0.15))
-                self.acid_processor.set_acid_tracers(payload.get("do_acid_tracers", True))
-                self.acid_processor.set_acid_strength_foreground(payload.get("acid_strength_foreground", 0.11))
-                self.acid_processor.set_zoom_factor(payload.get("zoom_factor", 1.0))
-                self.acid_processor.set_x_shift(payload.get("x_shift", 0))
-                self.acid_processor.set_y_shift(payload.get("y_shift", 0))
-                self.acid_processor.set_do_acid_wobblers(payload.get("do_acid_wobblers", False))
-                self.acid_processor.set_color_matching(payload.get("color_matching", 0.5))
-                img_acid = self.acid_processor.process(img_proc, human_seg_mask)
-
-                self.fps_tracker.start_segment("Diffusion")
-                self.de_img.set_input_image(img_acid)
-                self.de_img.set_guidance_scale(0.5)
-                self.de_img.set_strength(1 / self.de_img.num_inference_steps + 0.00001)
-                img_diffusion = np.array(self.de_img.generate())
-
-                # Server no longer applies any postprocessing; just send the diffusion result.
-                self.fps_tracker.start_segment("Send Result")
-                send_compressed(client_sock, img_diffusion, quality=90)
-
-                self.fps_tracker.print_fps()
-
-            except Exception as e:
-                print("Error handling client:", e)
-                import traceback
-                traceback.print_exc()
-                break
-
-        client_sock.close()
-
-    def serve_forever(self):
-        """Main loop to accept and serve clients."""
-        while True:
-            client_sock, addr = self.server_socket.accept()
-            self.handle_client(client_sock, addr)
+from diffusers.utils import load_image
 
 ###############################################################################
 # SubmersionClient
@@ -241,7 +49,7 @@ class SubmersionClient:
         self.do_fullscreen = True
 
         # Initialize LT camera, meta input, and renderer.
-        self.cam = lt.WebCam(shape_hw=self.shape_hw_cam)
+        # self.cam = lt.WebCam(shape_hw=self.shape_hw_cam)
         self.meta_input = lt.MetaInput()
         self.renderer = lt.Renderer(
             width=self.width_render,
@@ -253,7 +61,7 @@ class SubmersionClient:
         # Initialize the microphone prompt and speech detection.
         self.speech_detector = lt.Speech2Text()
         self.prompt_provider_microphone = PromptProviderMicrophone()
-        self.prompt_provider_txt_file = PromptProviderTxtFile("materials/prompts/dancing_fibers.txt")
+        self.prompt_provider_txt_file = PromptProviderTxtFile(os.getcwd()+"/materials/prompts/dancing_fibers.txt")
         self.audio_detector = AudioDetector()
         self.oscillator = Oscillator()
         self.fps_tracker = lt.FPSTracker()
@@ -325,12 +133,12 @@ class SubmersionClient:
                 data = pickle.dumps(payload, protocol=pickle.HIGHEST_PROTOCOL)
                 self.send_msg(self.sock, data)
 
-                print(f"Sending payload: {payload}")
+                # print(f"Sending payload: {payload}")
 
                 if cam_img is not None:
-                    if cam_img.shape[:2] != self.cam.shape_hw:
-                        desired_width = self.cam.shape_hw[1]
-                        desired_height = self.cam.shape_hw[0]
+                    if cam_img.shape[:2] != 512: #self.cam.shape_hw:
+                        desired_width = 512 #self.cam.shape_hw[1]
+                        desired_height = 512 #self.cam.shape_hw[0]
                         cam_img = cv2.resize(cam_img, (desired_width, desired_height))
                     print("Sending compressed image to server...")
                     send_compressed(self.sock, cam_img, quality=90)
@@ -338,7 +146,7 @@ class SubmersionClient:
                 else:
                     print("Warning: No camera image available to send")
                     # Send a dummy image to keep the protocol in sync
-                    dummy_img = np.zeros((self.cam.shape_hw[0], self.cam.shape_hw[1], 3), dtype=np.uint8)
+                    dummy_img = np.zeros((512, 512, 3), dtype=np.uint8)
                     send_compressed(self.sock, dummy_img, quality=90)
 
                 print("Sent payload")
@@ -369,7 +177,10 @@ class SubmersionClient:
             t_processing_start = time.time()
 
             self.fps_tracker.start_segment("Camera Capture")
-            img_cam = self.cam.get_img()
+            img_pil = gen_random_image() #self.cam.get_img()
+            img_pil = load_image("/media/monsterdrive/g_test/rtd/tests/output/generated_image_20250302_122818.png")
+            img_cam = np.array(img_pil).astype(np.uint8)
+
             with self.network_lock:
                 self.latest_cam_image = img_cam.copy()
 
@@ -380,6 +191,7 @@ class SubmersionClient:
                 human_seg_mask = np.ones_like(img_proc, dtype=np.float32) / 255
 
             self.fps_tracker.start_segment("Optical Flow")
+            # opt_flow = None
             opt_flow = self.opt_flow_estimator.get_optflow(img_cam.copy(), low_pass_kernel_size=55, window_length=55)
 
             with self.network_lock:
@@ -434,14 +246,7 @@ if __name__ == "__main__":
     else:
         server_ip = "localhost"
 
-    if role == "server":
-        # To test pure network latency, enable bounce mode by setting bounce=True.
-        server = SubmersionServer(bounce=False, do_compile=True)
-        try:
-            server.serve_forever()
-        except KeyboardInterrupt:
-            print("Server shutting down.")
-    elif role == "client":
+    if role == "client":
         client = SubmersionClient(server_host=server_ip)
         client.run()
     else:

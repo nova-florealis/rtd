@@ -20,9 +20,21 @@ from rtd.utils.prompt_provider import (
 import time
 import numpy as np
 from rtd.utils.frame_interpolation import AverageFrameInterpolator
+from rtd.utils.image_utils import gen_random_image
 import torch
+import os
 
+from PIL import Image, ImageDraw
+import random
 
+from diffusers.utils import load_image, make_image_grid
+from dotenv import load_dotenv
+
+load_dotenv(override=True)
+
+        
+
+        
 def get_sample_shape_unet(coord, noise_resolution_h, noise_resolution_w):
     channels = 640 if coord[0] == "e" else 1280 if coord[0] == "b" else 640
     if coord[0] == "e":
@@ -35,18 +47,43 @@ def get_sample_shape_unet(coord, noise_resolution_h, noise_resolution_w):
         shape = [1, channels, int(np.ceil(noise_resolution_h / coef)), int(np.ceil(noise_resolution_w / coef))]
     return shape
 
+def permute_prompt_words(prompt):
+    """
+    Randomly permute the words in the given prompt.
+    
+    Args:
+        prompt (str): The original prompt string
+        
+    Returns:
+        str: A new prompt with randomly permuted words
+    """
+    # Create an independent random generator to avoid affecting other random operations
+    word_randomizer = random.Random()
+    
+    # Split the prompt into words
+    words = prompt.split()
+    
+    # Shuffle the words
+    word_randomizer.shuffle(words)
+    
+    # Join words back into a prompt
+    return " ".join(words)
 
 if __name__ == "__main__":
     height_diffusion = int((384 + 96) * 1.0)  # 12 * (384 + 96) // 8
     width_diffusion = int((512 + 128) * 1.0)  # 12 * (512 + 128) // 8
-    height_render = 1080
-    width_render = 1920
-    n_frame_interpolations: int = 5
-    shape_hw_cam = (576, 1024)
+    height_render = 512
+    width_render = 512
+    n_frame_interpolations: int = 4
+    shape_hw_cam = (512, 512)
     do_compile = True
     do_diffusion = True
-    do_fullscreen = True
-    do_enable_dynamic_processor = True
+    do_fullscreen = False
+    do_enable_dynamic_processor = False
+    use_image2image = True
+
+    hf_model = "stabilityai/sdxl-turbo"
+
 
     device = "cuda:0"
     img_diffusion = None
@@ -67,7 +104,8 @@ if __name__ == "__main__":
 
     meta_input = lt.MetaInput()
     de_img = DiffusionEngine(
-        use_image2image=True,
+        hf_model=hf_model,
+        use_image2image=use_image2image,
         height_diffusion_desired=height_diffusion,
         width_diffusion_desired=width_diffusion,
         do_compile=do_compile,
@@ -86,7 +124,7 @@ if __name__ == "__main__":
         backend="opencv",
         do_fullscreen=do_fullscreen,
     )
-    cam = lt.WebCam(shape_hw=shape_hw_cam)
+    # cam = lt.WebCam(shape_hw=shape_hw_cam)
     input_image_processor = InputImageProcessor(device=device)
     input_image_processor.set_flip(do_flip=True, flip_axis=1)
 
@@ -106,7 +144,7 @@ if __name__ == "__main__":
     )
     speech_detector = lt.Speech2Text()
     prompt_provider_microphone = PromptProviderMicrophone()
-    prompt_provider_txt_file = PromptProviderTxtFile("materials/prompts/good_prompts_wl_community.txt")
+    prompt_provider_txt_file = PromptProviderTxtFile(os.getcwd()+"/materials/prompts/good_prompts_wl_community.txt")
     opt_flow_estimator = OpticalFlowEstimator(use_ema=False)
 
     posteffect_processor = Posteffect()
@@ -120,7 +158,7 @@ if __name__ == "__main__":
     # Initialize FPS tracking
     fps_tracker = lt.FPSTracker()
 
-    do_prompt_change = False
+    do_prompt_change = True
     fract_blend_embeds = 0.0
 
     while True:
@@ -128,7 +166,7 @@ if __name__ == "__main__":
         # bools
         new_prompt_mic_unmuter = meta_input.get(akai_lpd8="A1", akai_midimix="A3", button_mode="held_down")
         prompt_transition_time = meta_input.get(akai_lpd8="G1", akai_midimix="A1", val_min=1, val_max=20, val_default=8.0)
-        do_cycle_prompt_from_file = meta_input.get(akai_lpd8="C0", akai_midimix="A4", button_mode="pressed_once")
+        do_cycle_prompt_from_file = True #meta_input.get(akai_lpd8="C0", akai_midimix="A4", button_mode="pressed_once")
 
         dyn_prompt_mic_unmuter = meta_input.get(akai_lpd8="A0", akai_midimix="B3", button_mode="held_down")
         do_dynamic_processor = meta_input.get(akai_lpd8="B0", akai_midimix="B4", button_mode="toggle", val_default=False)
@@ -143,7 +181,7 @@ if __name__ == "__main__":
         do_audio_modulation = meta_input.get(akai_midimix="D4", button_mode="toggle", val_default=False)
         do_param_oscillators = meta_input.get(akai_midimix="C3", button_mode="toggle", val_default=False)
 
-        do_optical_flow = meta_input.get(akai_midimix="C4", button_mode="toggle", val_default=True)
+        do_optical_flow = meta_input.get(akai_midimix="C4", button_mode="toggle", val_default=False)
         do_postproc = meta_input.get(akai_midimix="E4", button_mode="toggle", val_default=True)
 
         # floats
@@ -196,7 +234,7 @@ if __name__ == "__main__":
             sound_volume = 0
 
         do_blur = False
-        do_acid_tracers = True
+        do_acid_tracers = False
 
         # if not do_enable_dynamic_processor:
         #     do_dynamic_processor = False
@@ -228,9 +266,20 @@ if __name__ == "__main__":
         # if we get new prompt: set current embeds as source embeds, get target embeds
         if do_prompt_change and do_diffusion:
             print(f"New prompt: {current_prompt}")
+            
+            # Save the original prompt as a reference
+            original_prompt = current_prompt
+            
+            # Randomly permute the words in the current prompt
+            permuted_prompt = permute_prompt_words(current_prompt)
+            
+            # Use the permuted prompt instead
+            current_prompt = permuted_prompt
+            print(f"Permuted prompt: {current_prompt}")
+            
             embeds_source = em.clone_embeddings(embeds)
             embeds_target = em.encode_prompt(current_prompt)
-            do_prompt_change = False
+            do_prompt_change = True
             # Reset the blend fraction when starting a new transition
             fract_blend_embeds = 0.0
             # Store the time when transition started
@@ -247,7 +296,13 @@ if __name__ == "__main__":
             de_img.set_embeddings(embeds)
 
         #
-        img_cam = cam.get_img()
+        # img_cam = cam.get_img()
+        # Import the new utility function
+        # Generate random image using our independent RNG function
+        img_pil = gen_random_image(width=512, height=512, shape_count=20)
+        
+        # Convert to numpy array
+        img_cam = np.array(img_pil).astype(np.uint8)
 
         fps_tracker.start_segment("Optical Flow")
         if do_optical_flow:
@@ -283,11 +338,20 @@ if __name__ == "__main__":
 
         # Start timing diffusion
         de_img.set_input_image(img_acid)
-        de_img.set_guidance_scale(0.5)
+        de_img.set_guidance_scale(0.5) #0.5
         de_img.set_strength(1 / de_img.num_inference_steps + 0.00001)
 
         fps_tracker.start_segment("Diffusion")
-        img_diffusion = np.array(de_img.generate())
+
+        kwargs_override = {
+            "num_inference_steps": 4,
+            "guidance_scale": 0,
+            "strength": 0.6,
+        }
+
+        kwargs_override=None
+
+        img_diffusion = np.array(de_img.generate(kwargs_override=kwargs_override))
 
         # apply posteffect
         if do_postproc:

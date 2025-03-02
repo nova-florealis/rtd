@@ -2,7 +2,7 @@ import numpy as np
 from rtd.sdxl_turbo.embeddings_mixer import EmbeddingsMixer
 from diffusers import AutoPipelineForText2Image, AutoPipelineForImage2Image
 from diffusers.models import UNet2DConditionModel
-from diffusers import StableDiffusionXLImg2ImgPipeline, DPMSolverSinglestepScheduler
+from diffusers import StableDiffusionXLImg2ImgPipeline, StableDiffusionXLPipeline, EulerDiscreteScheduler, DPMSolverSinglestepScheduler
 from diffusers import AutoencoderTiny
 import torch
 from PIL import Image
@@ -19,6 +19,9 @@ import time
 
 from diffusers.configuration_utils import ConfigMixin, register_to_config
 from diffusers.utils import USE_PEFT_BACKEND, BaseOutput, deprecate, logging, scale_lora_layers, unscale_lora_layers
+
+from safetensors.torch import load_file
+from huggingface_hub import hf_hub_download
 
 import xformers
 import triton
@@ -669,7 +672,9 @@ class DiffusionEngine():
         use_image2image = True,
         use_tinyautoenc = True,
         device = 'cuda:0',
-        hf_model = "sd-community/sdxl-flash", #'stabilityai/sdxl-turbo',
+        hf_model = "stabilityai/stable-diffusion-xl-base-1.0", #'stabilityai/sdxl-turbo',
+        repo = "ByteDance/SDXL-Lightning",
+        ckpt = "sdxl_lightning_4step_unet.safetensors",
         do_compile = False,
         do_diffusion = True
     ):
@@ -679,6 +684,8 @@ class DiffusionEngine():
         self.use_tinyautoenc = use_tinyautoenc
         self.device = device
         self.hf_model = hf_model
+        self.repo = repo
+        self.ckpt = ckpt
         
         self.num_inference_steps = None
         self.seed = 420
@@ -720,10 +727,28 @@ class DiffusionEngine():
         with a torch_dtype of float16 and variant "fp16". The model is loaded from local files only. 
         The number of inference steps is set to 2 and the pipeline is initialized with the loaded model.
         """
+
+        unet = UNet2DConditionModel.from_config(self.hf_model, subfolder="unet").to("cuda", torch.float16)
+        unet.load_state_dict(load_file(hf_hub_download(self.repo, self.ckpt), device="cuda"))
+
         try:
-            pipe = StableDiffusionXLImg2ImgPipeline.from_pretrained(self.hf_model, torch_dtype=torch.float16, local_files_only=True, add_watermarker=False)
+            pipe = StableDiffusionXLImg2ImgPipeline.from_pretrained(
+                self.hf_model,
+                unet=unet,
+                torch_dtype=torch.float16,
+                variant="fp16",
+                local_files_only=True,
+                add_watermarker=False,
+            )
         except Exception as e:
-            pipe = StableDiffusionXLImg2ImgPipeline.from_pretrained(self.hf_model, torch_dtype=torch.float16, local_files_only=False, add_watermarker=False)
+            pipe = StableDiffusionXLImg2ImgPipeline.from_pretrained(
+                self.hf_model,
+                unet=unet,
+                torch_dtype=torch.float16,
+                variant="fp16",
+                local_files_only=False,
+                add_watermarker=False,
+            )
         self.num_inference_steps = 4
         self._init_pipe(pipe)
         self.init_input_image_noise()
@@ -734,11 +759,29 @@ class DiffusionEngine():
         with a torch_dtype of float16 and variant "fp16". The model is loaded from local files only. 
         The number of inference steps is set to 1 and the pipeline is initialized with the loaded model.
         """
+
+        unet = UNet2DConditionModel.from_config(self.hf_model, subfolder="unet").to("cuda", torch.float16)
+        unet.load_state_dict(load_file(hf_hub_download(self.repo, self.ckpt), device="cuda"))
+
         try:
-            pipe = AutoPipelineForText2Image.from_pretrained(self.hf_model, torch_dtype=torch.float16, local_files_only=True, add_watermarker=False)
+            pipe = StableDiffusionXLPipeline.from_pretrained(
+                self.hf_model,
+                unet=unet,
+                torch_dtype=torch.float16,
+                variant="fp16",
+                local_files_only=True,
+                add_watermarker=False,
+            )
         except Exception as e:
-            pipe = AutoPipelineForText2Image.from_pretrained(self.hf_model, torch_dtype=torch.float16, local_files_only=False, add_watermarker=False)
-        self.num_inference_steps = 2
+            pipe = StableDiffusionXLPipeline.from_pretrained(
+                self.hf_model,
+                unet=unet,
+                torch_dtype=torch.float16,
+                variant="fp16",
+                local_files_only=False,
+                add_watermarker=False,
+            )
+        self.num_inference_steps = 4
         self._init_pipe(pipe)
 
     def _init_pipe(self, pipe):
@@ -755,11 +798,14 @@ class DiffusionEngine():
         pipe.set_progress_bar_config(disable=True)
         pipe.unet.forward = forward_modulated.__get__(pipe.unet, UNet2DConditionModel)
 
-        if "flash" in self.hf_model:
-            pipe.scheduler = DPMSolverSinglestepScheduler.from_config(
-                pipe.scheduler.config,
-                timestep_spacing="trailing",
-            )
+        # if "flash" in self.hf_model:
+        #     pipe.scheduler = DPMSolverSinglestepScheduler.from_config(
+        #         pipe.scheduler.config,
+        #         timestep_spacing="trailing",
+        #     )
+
+        pipe.scheduler = EulerDiscreteScheduler.from_config(pipe.scheduler.config, timestep_spacing="trailing")
+
 
         if self.use_image2image:
             pipe.prepare_latents = prepare_latents_custom_noise.__get__(pipe, StableDiffusionXLImg2ImgPipeline)

@@ -1,5 +1,5 @@
 import unittest
-from src.rtd.utils.prompt_provider import PromptProviderMicrophone
+from rtd.utils.prompt_provider import PromptProviderMicrophone
 
 class FakeAudioRecorder:
     def __init__(self):

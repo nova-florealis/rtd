@@ -1,5 +1,5 @@
 import numpy as np
-from src.rtd.utils.input_image import InputImageProcessor
+from rtd.utils.input_image import InputImageProcessor
 
 def test_input_image_processor_with_segmentation():
     # Generate synthetic image data: 256x256x3 with uint8 values.

@@ -199,7 +199,7 @@ class EmbeddingsMixer:
         return [embed.clone() for embed in embeds]
 
 if __name__ == "__main__":
-    from diffusion_engine import DiffusionEngine
+    from rtd.sdxl_turbo.diffusion_engine import DiffusionEngine
 #%%
     de_txt = DiffusionEngine(use_image2image=False, height_diffusion_desired=512, width_diffusion_desired=512)
     em = EmbeddingsMixer(de_txt.pipe)
