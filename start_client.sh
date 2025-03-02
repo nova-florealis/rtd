@@ -1,0 +1,1 @@
+uv run scripts/submersion_server.py client 109.49.179.254
