@@ -49,7 +49,7 @@ class SubmersionClient:
         self.do_fullscreen = True
 
         # Initialize LT camera, meta input, and renderer.
-        # self.cam = lt.WebCam(shape_hw=self.shape_hw_cam)
+        self.cam = lt.WebCam(shape_hw=self.shape_hw_cam)
         self.meta_input = lt.MetaInput()
         self.renderer = lt.Renderer(
             width=self.width_render,
@@ -136,9 +136,9 @@ class SubmersionClient:
                 # print(f"Sending payload: {payload}")
 
                 if cam_img is not None:
-                    if cam_img.shape[:2] != 512: #self.cam.shape_hw:
-                        desired_width = 512 #self.cam.shape_hw[1]
-                        desired_height = 512 #self.cam.shape_hw[0]
+                    if cam_img.shape[:2] != self.cam.shape_hw:
+                        desired_width = self.cam.shape_hw[1]
+                        desired_height = self.cam.shape_hw[0]
                         cam_img = cv2.resize(cam_img, (desired_width, desired_height))
                     print("Sending compressed image to server...")
                     send_compressed(self.sock, cam_img, quality=90)
@@ -146,7 +146,7 @@ class SubmersionClient:
                 else:
                     print("Warning: No camera image available to send")
                     # Send a dummy image to keep the protocol in sync
-                    dummy_img = np.zeros((512, 512, 3), dtype=np.uint8)
+                    dummy_img = np.zeros((self.cam.shape_hw[0], self.cam.shape_hw[1], 3), dtype=np.uint8)
                     send_compressed(self.sock, dummy_img, quality=90)
 
                 print("Sent payload")
