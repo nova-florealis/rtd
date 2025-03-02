@@ -16,16 +16,6 @@ import os
 
 load_dotenv(override=True)
 
-if len(sys.argv) > 1 and sys.argv[1].lower() == "server":
-    from rtd.sdxl_turbo.diffusion_engine import DiffusionEngine
-    from rtd.sdxl_turbo.embeddings_mixer import EmbeddingsMixer
-    from rtd.dynamic_processor.processor_dynamic_module import DynamicProcessor
-    from rtd.utils.input_image import InputImageProcessor, AcidProcessor
-    # Even though these are imported for the server branch, note that the server will no longer
-    # perform optical flow or postprocessing.
-    from rtd.utils.optical_flow import OpticalFlowEstimator
-    from rtd.utils.posteffect import Posteffect
-
 from rtd.utils.input_image import InputImageProcessor, AcidProcessor
 from rtd.utils.compression_helpers import send_compressed, recv_compressed
 from rtd.utils.optical_flow import OpticalFlowEstimator
@@ -177,9 +167,7 @@ class SubmersionClient:
             t_processing_start = time.time()
 
             self.fps_tracker.start_segment("Camera Capture")
-            img_pil = gen_random_image() #self.cam.get_img()
-            img_pil = load_image("/media/monsterdrive/g_test/rtd/tests/output/generated_image_20250302_122818.png")
-            img_cam = np.array(img_pil).astype(np.uint8)
+            img_cam = self.cam.get_img()
 
             with self.network_lock:
                 self.latest_cam_image = img_cam.copy()
