@@ -6,3 +6,7 @@ SD Flash issue sources:
 
 prepare_latents_custom_noise
 init_input_image_noise
+
+GIT_SSH_COMMAND='ssh -i ~/.ssh/id_RTD' git add .
+GIT_SSH_COMMAND='ssh -i ~/.ssh/id_RTD' git commit -m commit
+GIT_SSH_COMMAND='ssh -i ~/.ssh/id_RTD' git push
