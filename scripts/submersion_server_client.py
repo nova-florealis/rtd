@@ -543,6 +543,7 @@ class SubmersionClient:
 
                 # Wait for the processed image (the server sends either a debug image or a diffusion image based on do_debug_seethrough).
                 processed_image = recv_compressed(self.sock)
+                print("PROCESSSED IMAGE", processed_image.shape)
                 if processed_image is None:
                     print("Disconnected from server")
                     break

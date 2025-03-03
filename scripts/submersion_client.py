@@ -103,22 +103,22 @@ class SubmersionClient:
                     cam_img = self.latest_cam_image.copy() if self.latest_cam_image is not None else None
 
                 payload = {
-                    "do_human_seg": self.meta_input.get(akai_lpd8="B1", akai_midimix="E3", button_mode="toggle", val_default=True),
+                    "do_human_seg": self.meta_input.get(akai_lpd8="B1", akai_midimix="E3", button_mode="toggle", val_default=False),
                     "acid_strength": self.meta_input.get(akai_lpd8="E0", akai_midimix="C0", val_min=0, val_max=1.0, val_default=0.05),
                     "acid_strength_foreground": self.meta_input.get(akai_lpd8="E1", akai_midimix="C1", val_min=0, val_max=1.0, val_default=0.05),
                     "coef_noise": self.meta_input.get(akai_lpd8="F0", akai_midimix="C2", val_min=0, val_max=0.3, val_default=0.05),
-                    "zoom_factor": self.meta_input.get(akai_lpd8="F1", akai_midimix="H2", val_min=0.5, val_max=1.5, val_default=1.0),
+                    "zoom_factor": self.meta_input.get(akai_lpd8="F1", akai_midimix="H2", val_min=0.5, val_max=1.5, val_default=1.1),
                     "x_shift": int(self.meta_input.get(akai_midimix="H0", val_min=-50, val_max=50, val_default=0)),
                     "y_shift": int(self.meta_input.get(akai_midimix="H1", val_min=-50, val_max=50, val_default=0)),
                     "color_matching": self.meta_input.get(akai_lpd8="G0", akai_midimix="G0", val_min=0, val_max=1, val_default=0.5),
                     "mic_prompt": self.prompt_provider_microphone.get_current_prompt() if self.prompt_provider_microphone.handle_unmute_button(self.meta_input.get(akai_lpd8="A1", akai_midimix="A3", button_mode="held_down")) else None,
-                    "txt_file_prompt": self.prompt_provider_txt_file.get_current_prompt() if self.meta_input.get(akai_lpd8="C0", akai_midimix="A4", button_mode="pressed_once") else None,
+                    "txt_file_prompt": "a blue dog and a red monkey", #self.prompt_provider_txt_file.get_current_prompt() if self.meta_input.get(akai_lpd8="C0", akai_midimix="A4", button_mode="pressed_once") else None,
                     "dynamic_transcript": self.speech_detector.transcript if self.speech_detector.handle_unmute_button(self.meta_input.get(akai_lpd8="A0", akai_midimix="B3", button_mode="held_down")) else None,
                     "brightness": self.meta_input.get(akai_midimix="A2", val_min=0.0, val_max=2, val_default=1.0),
                     "do_infrared_colorize": self.meta_input.get(akai_lpd8="D0", akai_midimix="H4", button_mode="toggle", val_default=False),
                     "dyn_prompt_restore_backup": self.meta_input.get(akai_midimix="F3", button_mode="released_once"),
                     "dyn_prompt_del_current": self.meta_input.get(akai_midimix="F4", button_mode="released_once"),
-                    "prompt_transition_time": self.meta_input.get(akai_lpd8="G1", val_min=1, val_max=20, val_default=8.0),
+                    "prompt_transition_time": self.meta_input.get(akai_lpd8="G1", val_min=1, val_max=20, val_default=1.0),
                 }
                 data = pickle.dumps(payload, protocol=pickle.HIGHEST_PROTOCOL)
                 self.send_msg(self.sock, data)
@@ -143,7 +143,7 @@ class SubmersionClient:
 
                 print("Waiting for processed image from server...")
                 processed_image = recv_compressed(self.sock)
-                print("Received processed image")
+                print("Received processed image", processed_image.shape)
                 
                 if processed_image is not None:
                     with self.network_lock:
@@ -202,18 +202,18 @@ class SubmersionClient:
                 opt_flow = opt_flow[:,:,::2]
 
             self.fps_tracker.start_segment("Post Processing")
-            output_to_render, _ = self.posteffect_processor.process(
-                remote_diff,
-                human_seg_mask.astype(np.float32) / 255,
-                opt_flow,
-                postproc_func_coef1,
-                postproc_func_coef2,
-                postproc_mod_button1,
-                sound_volume,
-            )
+            # output_to_render, _ = self.posteffect_processor.process(
+            #     remote_diff,
+            #     human_seg_mask.astype(np.float32) / 255,
+            #     opt_flow,
+            #     postproc_func_coef1,
+            #     postproc_func_coef2,
+            #     postproc_mod_button1,
+            #     sound_volume,
+            # )
 
             self.fps_tracker.start_segment("Rendering")
-            self.renderer.render(output_to_render)
+            self.renderer.render(remote_diff)
 
             t_processing = time.time() - t_processing_start
             self.fps_tracker.print_fps()
