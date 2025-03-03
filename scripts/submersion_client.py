@@ -13,6 +13,7 @@ from rtd.utils.image_utils import gen_random_image
 import threading
 from dotenv import load_dotenv
 import os
+from rtd.utils.fft_analyzer import get_stream_analyzer  # Add import for FFT analyzer
 
 load_dotenv(override=True)
 
@@ -55,6 +56,9 @@ class SubmersionClient:
         self.audio_detector = AudioDetector()
         self.oscillator = Oscillator()
         self.fps_tracker = lt.FPSTracker()
+
+        # Initialize the FFT audio analyzer
+        self.fft_analyzer = get_stream_analyzer()
 
         # Initialize local processors for optical flow and posteffect processing.
         self.opt_flow_estimator = OpticalFlowEstimator(use_ema=False)
@@ -101,6 +105,9 @@ class SubmersionClient:
             try:
                 with self.network_lock:
                     cam_img = self.latest_cam_image.copy() if self.latest_cam_image is not None else None
+                
+                # Get FFT audio features
+                raw_fftx, raw_fft, binned_fftx, binned_fft = self.fft_analyzer.get_audio_features()
 
                 payload = {
                     "do_human_seg": self.meta_input.get(akai_lpd8="B1", akai_midimix="E3", button_mode="toggle", val_default=False),
@@ -119,6 +126,11 @@ class SubmersionClient:
                     "dyn_prompt_restore_backup": self.meta_input.get(akai_midimix="F3", button_mode="released_once"),
                     "dyn_prompt_del_current": self.meta_input.get(akai_midimix="F4", button_mode="released_once"),
                     "prompt_transition_time": self.meta_input.get(akai_lpd8="G1", val_min=1, val_max=20, val_default=1.0),
+                    # Add FFT audio features to the payload
+                    # "raw_fftx": raw_fftx.tolist() if hasattr(raw_fftx, 'tolist') else raw_fftx,
+                    # "raw_fft": raw_fft.tolist() if hasattr(raw_fft, 'tolist') else raw_fft,
+                    # "binned_fftx": binned_fftx.tolist() if hasattr(binned_fftx, 'tolist') else binned_fftx,
+                    "binned_fft": binned_fft.tolist() if hasattr(binned_fft, 'tolist') else binned_fft,
                 }
                 data = pickle.dumps(payload, protocol=pickle.HIGHEST_PROTOCOL)
                 self.send_msg(self.sock, data)
