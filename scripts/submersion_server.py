@@ -17,6 +17,7 @@ load_dotenv(override=True)
 
 if len(sys.argv) > 1 and sys.argv[1].lower() == "server":
     from rtd.sdxl_turbo.diffusion_engine import DiffusionEngine
+    from rtd.sdxl_turbo.simple_diffusion_engine import SimpleDiffusionEngine
     from rtd.sdxl_turbo.embeddings_mixer import EmbeddingsMixer
     from rtd.dynamic_processor.processor_dynamic_module import DynamicProcessor
     from rtd.utils.input_image import InputImageProcessor, AcidProcessor
@@ -42,7 +43,7 @@ class SubmersionServer:
         self.do_compile = do_compile
         self.bounce = bounce  # If True, the server will simply echo back the received image without processing
 
-        # These dimensions match the submersion pipeline settings.
+        # These dimensions MUST match the submersion pipeline settings.
         self.height_diffusion = int((384 + 96) * 1.0)
         self.width_diffusion = int((512 + 128) * 1.0)
 
@@ -71,19 +72,24 @@ class SubmersionServer:
             # self.opt_flow_estimator = OpticalFlowEstimator(use_ema=False)
             # self.posteffect_processor = Posteffect()
 
-            self.de_img = DiffusionEngine(
-                hf_model="stabilityai/sdxl-turbo",
+            self.de_img = SimpleDiffusionEngine(
+                # hf_model="sd-community/sdxl-flash",
                 use_image2image=True,
                 height_diffusion_desired=self.height_diffusion,
                 width_diffusion_desired=self.width_diffusion,
                 do_compile=self.do_compile,
                 do_diffusion=self.do_diffusion,
                 device=device,
+                use_lightning=True,
             )
+
+            self.de_img.set_guidance_scale(0.0) #Flash - 1.2
+            self.de_img.set_strength(0.45) # Flash 0.4 // Default - 1 / self.de_img.num_inference_steps + 0.00001)
+            self.de_img.set_num_inference_steps(4) # Flash - 10
 
             if self.do_diffusion:
                 self.em = EmbeddingsMixer(self.de_img.pipe)
-                init_prompt = 'Dancing people full of glowing neon nerve fibers and filamenets'
+                init_prompt = 'A rainbow spectrum entity human figure in a dark void.'
                 self.embeds = self.em.encode_prompt(init_prompt)
                 self.embeds_source = self.em.clone_embeddings(self.embeds)
                 self.embeds_target = self.em.clone_embeddings(self.embeds)
@@ -99,6 +105,10 @@ class SubmersionServer:
             print("Submersion server ready.")
         else:
             print("Bounce mode enabled: Server will echo the received image without processing.")
+            self.fps_tracker = lt.FPSTracker()
+
+        # Create output directory
+        os.makedirs("output", exist_ok=True)
 
     def recvall(self, sock, n):
         """Helper: receive exactly n bytes from the socket."""
@@ -122,6 +132,18 @@ class SubmersionServer:
         """Send a length-prefixed message."""
         msg = struct.pack("!I", len(msg)) + msg
         sock.sendall(msg)
+
+    def permute_prompt(self, prompt):
+        """Shuffles the words in a prompt while preserving basic structure."""
+        if not prompt:
+            return prompt
+        words = prompt.split()
+        # Don't shuffle if there's only one word
+        if len(words) <= 1:
+            return prompt
+        # Shuffle the words
+        np.random.shuffle(words)
+        return ' '.join(words)
 
     def handle_client(self, client_sock, addr):
         print(f"Connected by {addr}")
@@ -151,8 +173,15 @@ class SubmersionServer:
                         print(f"New text file prompt received: {txt_file_prompt}")
                         self.transition_start_time = time.time()
                         self.embeds_source = self.em.clone_embeddings(self.embeds)
+
                         self.embeds_target = self.em.encode_prompt(txt_file_prompt)
                         self.fract_blend_embeds = 0.0
+
+                        # permuted_prompt = self.permute_prompt(txt_file_prompt)
+                        # print(f"Permuted prompt: {permuted_prompt}")
+
+                        # self.embeds = self.em.encode_prompt(permuted_prompt)
+                        # self.de_img.set_embeddings(self.embeds)
 
                     # Removed dynamic processor related processing.
 
@@ -178,7 +207,7 @@ class SubmersionServer:
                     print(f"Invalid image received: {type(img_cam)}")
                     continue
 
-                print("Received image")
+                print(f"Received image! {type(img_cam)}")
 
                 self.fps_tracker.start_segment("Input Image Processing")
                 self.input_image_processor.set_human_seg(payload.get("do_human_seg", True))
@@ -188,6 +217,10 @@ class SubmersionServer:
                 self.input_image_processor.set_infrared_colorize(payload.get("do_infrared_colorize", False))
                 img_proc, human_seg_mask = self.input_image_processor.process(img_cam.copy())
 
+                print("Processed image", img_proc.shape)
+                # os.makedirs("output", exist_ok=True)
+                # cv2.imwrite("output/processed_image.png", cv2.cvtColor(img_proc, cv2.COLOR_RGB2BGR))
+                
                 if not payload.get("do_human_seg", True):
                     human_seg_mask = np.ones_like(img_proc).astype(np.float32) / 255
 
@@ -201,17 +234,24 @@ class SubmersionServer:
                 self.acid_processor.set_y_shift(payload.get("y_shift", 0))
                 self.acid_processor.set_do_acid_wobblers(payload.get("do_acid_wobblers", False))
                 self.acid_processor.set_color_matching(payload.get("color_matching", 0.5))
+
                 img_acid = self.acid_processor.process(img_proc, human_seg_mask)
 
                 self.fps_tracker.start_segment("Diffusion")
+
+                # This is the image that will be diffused.
                 self.de_img.set_input_image(img_acid)
-                self.de_img.set_guidance_scale(0.5)
-                self.de_img.set_strength(1 / self.de_img.num_inference_steps + 0.00001)
+
+                kwargs_override = {}
+
                 img_diffusion = np.array(self.de_img.generate())
+                self.acid_processor.update(img_diffusion)
 
                 # Server no longer applies any postprocessing; just send the diffusion result.
                 self.fps_tracker.start_segment("Send Result")
+                print("DIFFUSION RESULT", img_diffusion.shape)
                 send_compressed(client_sock, img_diffusion, quality=90)
+                print("Sent result")
 
                 self.fps_tracker.print_fps()
 
@@ -219,15 +259,21 @@ class SubmersionServer:
                 print("Error handling client:", e)
                 import traceback
                 traceback.print_exc()
+                client_sock.close()
                 break
 
         client_sock.close()
 
     def serve_forever(self):
         """Main loop to accept and serve clients."""
-        while True:
-            client_sock, addr = self.server_socket.accept()
-            self.handle_client(client_sock, addr)
+        try:
+            while True:
+                client_sock, addr = self.server_socket.accept()
+                self.handle_client(client_sock, addr)
+        except KeyboardInterrupt:
+            print("Shutting down server...")
+        finally:
+            self.server_socket.close()
 
 ###############################################################################
 # Main entry point

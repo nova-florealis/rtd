@@ -730,6 +730,7 @@ class DiffusionEngine():
 
         unet = UNet2DConditionModel.from_config(self.hf_model, subfolder="unet").to("cuda", torch.float16)
         unet.load_state_dict(load_file(hf_hub_download(self.repo, self.ckpt), device="cuda"))
+        unet.to("cuda", torch.float16)
 
         try:
             pipe = StableDiffusionXLImg2ImgPipeline.from_pretrained(
@@ -762,6 +763,7 @@ class DiffusionEngine():
 
         unet = UNet2DConditionModel.from_config(self.hf_model, subfolder="unet").to("cuda", torch.float16)
         unet.load_state_dict(load_file(hf_hub_download(self.repo, self.ckpt), device="cuda"))
+        unet.to("cuda", torch.float16)
 
         try:
             pipe = StableDiffusionXLPipeline.from_pretrained(

@@ -69,7 +69,7 @@ def load_sdxl_lightning_img2img(steps=4):
     return pipe
 
 # Choose which implementation to use
-use_lightning = True
+use_lightning = False
 steps = 4  # Choose from 1, 2, 4, or 8 steps
 
 if use_lightning:

@@ -753,7 +753,7 @@ class DiffusionEngine():
             pipe.vae = AutoencoderTiny.from_pretrained('madebyollin/taesdxl', torch_device=self.device, torch_dtype=torch.float16)
         pipe.vae = pipe.vae.to(self.device)
         pipe.set_progress_bar_config(disable=True)
-        pipe.unet.forward = forward_modulated.__get__(pipe.unet, UNet2DConditionModel)
+        # pipe.unet.forward = forward_modulated.__get__(pipe.unet, UNet2DConditionModel)
 
         if "flash" in self.hf_model:
             pipe.scheduler = DPMSolverSinglestepScheduler.from_config(
@@ -761,8 +761,8 @@ class DiffusionEngine():
                 timestep_spacing="trailing",
             )
 
-        if self.use_image2image:
-            pipe.prepare_latents = prepare_latents_custom_noise.__get__(pipe, StableDiffusionXLImg2ImgPipeline)
+        # if self.use_image2image:
+        #     pipe.prepare_latents = prepare_latents_custom_noise.__get__(pipe, StableDiffusionXLImg2ImgPipeline)
 
         if self.do_compile:
             pipe.enable_xformers_memory_efficient_attention()

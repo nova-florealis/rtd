@@ -414,7 +414,7 @@ class AcidProcessor:
             image_input = image_input.cpu().numpy()
             image_input = np.asarray(255 * image_input, dtype=np.uint8)
         if self.last_diffusion_image_torch is None:
-            print("InputImageProcessor: last_diffusion_image_torch=None. returning original image...")
+            print("AcidProcessor: last_diffusion_image_torch=None. returning original image...")
             return image_input
 
         last_diffusion_image_torch = self.last_diffusion_image_torch

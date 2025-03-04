@@ -4,8 +4,24 @@ import numpy as np
 import torch
 import lunar_tools as lt
 from rtd.sdxl_turbo.diffusion_engine import DiffusionEngine
+from rtd.sdxl_turbo.simple_diffusion_engine import SimpleDiffusionEngine
 from rtd.sdxl_turbo.embeddings_mixer import EmbeddingsMixer
 from diffusers.utils import load_image, make_image_grid
+import os
+from pathlib import Path
+
+def save_image(image, output_dir="/media/monsterdrive/g_test/rtd/tests/output"):
+    # Create output directory if it doesn't exist
+    Path(output_dir).mkdir(parents=True, exist_ok=True)
+    
+    # Generate timestamp for unique filename
+    timestamp = time.strftime("%Y%m%d_%H%M%S")
+    filename = f"generated_image_{timestamp}.png"
+    output_path = os.path.join(output_dir, filename)
+    
+    # Save the image
+    image.save(output_path)
+    print(f"Image saved to: {output_path}")
 
 def test_threaded():
     pass
@@ -63,15 +79,16 @@ def test_i2i():
     width_diffusion = 512
 
     hf_model = "sd-community/sdxl-flash"
-    hf_model = "stabilityai/stable-diffusion-xl-base-1.0"
+    # hf_model = "stabilityai/stable-diffusion-xl-base-1.0"
     # hf_model = "stabilityai/sdxl-turbo"
 
-    de = DiffusionEngine(
-        hf_model=hf_model,
+    de = SimpleDiffusionEngine(
+        # hf_model=hf_model,
         use_image2image=True,
         height_diffusion_desired=height_diffusion,
         width_diffusion_desired=width_diffusion,
         do_compile=True,
+        use_lightning=True,
     )
 
     em = EmbeddingsMixer(de.pipe)
@@ -80,6 +97,10 @@ def test_i2i():
     img_init = load_image("/media/monsterdrive/g_test/rtd/tests/output/generated_image_20250302_122818.png")
     de.set_input_image(img_init)
     de.set_embeddings(embeds)
+
+    de.set_guidance_scale(0.0) #0.5
+    de.set_strength(0.6) #1 / self.de_img.num_inference_steps + 0.00001)
+    de.set_num_inference_steps(2)
     
     renderer = lt.Renderer(
         width=width_diffusion,
@@ -89,17 +110,20 @@ def test_i2i():
     )
     # midi_input = lt.MidiInput(device_name="akai_midimix")
     
-    kwargs_override = {
-        "num_inference_steps": 4,
-        "guidance_scale": 0,
-        "strength": 0.6,
-    }
+    # kwargs_override = {
+    #     # "num_inference_steps": 4,
+    #     # "guidance_scale": 0,
+    #     # "strength": 0.6,
+    # }
 
-    print("Press Ctrl+C to exit")
-    while True:
-        # num_inference_steps = int(midi_input.get("A0", val_min=1, val_max=5))
-        img = de.generate(kwargs_override=kwargs_override)
-        renderer.render(img)
+    img = de.generate(kwargs_override=None)
+    save_image(image=img)
+
+    # print("Press Ctrl+C to exit")
+    # while True:
+    #     # num_inference_steps = int(midi_input.get("A0", val_min=1, val_max=5))
+    #     img = de.generate(kwargs_override=kwargs_override)
+    #     renderer.render(img)
 
 def test_prompt_sequence():
     height_diffusion = 704
