@@ -116,6 +116,7 @@ class SubmersionClient:
     def process_frequency_bins(self, binned_fft):
         """
         Process frequency bins to adjust zoom factor based on changes in low and high frequency bands.
+        With a balancing mechanism to return to neutral zoom (1.0) when there is no significant activity.
         
         Args:
             binned_fft: List containing the frequency bins (low, mid, high)
@@ -163,8 +164,27 @@ class SubmersionClient:
             # Low frequencies decrease zoom (zoom out)
             zoom_adjustment = zoom_in_factor - zoom_out_factor
             
-            # Apply adjustment to zoom factor with bounds
-            new_zoom = self.zoom_factor_value + zoom_adjustment
+            # Calculate activity level to determine if we should return to neutral
+            total_activity = low_delta_pct + high_delta_pct
+            
+            # If there's significant activity, apply the calculated adjustment
+            # Otherwise gradually return to neutral (1.0)
+            if max(low_delta_pct, high_delta_pct) > 0.9:  # Threshold for considering activity significant
+                # Apply normal adjustment based on frequency analysis
+                new_zoom = self.zoom_factor_value + zoom_adjustment
+            else:
+                # Return to neutral (1.0) gradually when no significant activity
+                # Apply a small correction toward 1.0 (neutral position)
+                rebalance_rate = 0.005  # Small step toward neutral per frame
+                if self.zoom_factor_value > 1.0:
+                    new_zoom = self.zoom_factor_value - rebalance_rate
+                elif self.zoom_factor_value < 1.0:
+                    new_zoom = self.zoom_factor_value + rebalance_rate
+                else:
+                    new_zoom = 1.0
+                    
+                # Print occasional debug info about rebalancing
+                print(f"No significant audio activity. Rebalancing zoom: {self.zoom_factor_value:.2f} -> {new_zoom:.2f}")
             
             # Keep within reasonable bounds (0.8 to 1.5)
             new_zoom = max(0.8, min(1.5, new_zoom))
