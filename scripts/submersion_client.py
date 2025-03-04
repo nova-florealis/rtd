@@ -22,6 +22,8 @@ from rtd.utils.compression_helpers import send_compressed, recv_compressed
 from rtd.utils.optical_flow import OpticalFlowEstimator
 from rtd.utils.posteffect import Posteffect
 
+import random
+
 from diffusers.utils import load_image
 
 ###############################################################################
@@ -69,6 +71,11 @@ class SubmersionClient:
         self.network_lock = threading.Lock()
         self.latest_cam_image = None
         self.latest_remote_diffusion = None
+        
+        # Initialize counter variables for incrementing values
+        self.zoom_factor_value = 1.0  # Starting at 1.0
+        self.x_shift_value = 0.0     # Starting at 0.0
+        self.y_shift_value = 0.0     # Starting at 0.0
 
         # Connect to the server.
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -108,15 +115,28 @@ class SubmersionClient:
                 
                 # Get FFT audio features
                 raw_fftx, raw_fft, binned_fftx, binned_fft = self.fft_analyzer.get_audio_features()
+                
+                # Update incrementing values
+                self.zoom_factor_value += 0.01
+                if self.zoom_factor_value > 1.5:  # Reset if exceeds upper limit
+                    self.zoom_factor_value = 0.8
+                    
+                # self.x_shift_value += 0.1
+                # if self.x_shift_value > 5.0:  # Reset if exceeds upper limit
+                #     self.x_shift_value = -1.0
+                
+                # self.y_shift_value += 0.1
+                # if self.y_shift_value > 5.0:  # Reset if exceeds upper limit
+                #     self.y_shift_value = -1.0
 
                 payload = {
                     "do_human_seg": self.meta_input.get(akai_lpd8="B1", akai_midimix="E3", button_mode="toggle", val_default=False),
-                    "acid_strength": self.meta_input.get(akai_lpd8="E0", akai_midimix="C0", val_min=0, val_max=1.0, val_default=0.05),
-                    "acid_strength_foreground": self.meta_input.get(akai_lpd8="E1", akai_midimix="C1", val_min=0, val_max=1.0, val_default=0.05),
+                    "acid_strength": self.meta_input.get(akai_lpd8="E0", akai_midimix="C0", val_min=0, val_max=1.0, val_default=0.4),
+                    "acid_strength_foreground": self.meta_input.get(akai_lpd8="E1", akai_midimix="C1", val_min=0, val_max=1.0, val_default=0.4),
                     "coef_noise": self.meta_input.get(akai_lpd8="F0", akai_midimix="C2", val_min=0, val_max=0.3, val_default=0.05),
-                    "zoom_factor": self.meta_input.get(akai_lpd8="F1", akai_midimix="H2", val_min=0.5, val_max=1.5, val_default=1.1),
-                    "x_shift": int(self.meta_input.get(akai_midimix="H0", val_min=-50, val_max=50, val_default=0)),
-                    "y_shift": int(self.meta_input.get(akai_midimix="H1", val_min=-50, val_max=50, val_default=0)),
+                    "zoom_factor": self.meta_input.get(akai_lpd8="F1", akai_midimix="H2", val_min=0.5, val_max=1.5, val_default=self.zoom_factor_value),
+                    "x_shift": int(self.meta_input.get(akai_midimix="H0", val_min=-50, val_max=50, val_default=self.x_shift_value)),
+                    "y_shift": int(self.meta_input.get(akai_midimix="H1", val_min=-50, val_max=50, val_default=self.y_shift_value)),
                     "color_matching": self.meta_input.get(akai_lpd8="G0", akai_midimix="G0", val_min=0, val_max=1, val_default=0.5),
                     "mic_prompt": self.prompt_provider_microphone.get_current_prompt() if self.prompt_provider_microphone.handle_unmute_button(self.meta_input.get(akai_lpd8="A1", akai_midimix="A3", button_mode="held_down")) else None,
                     "txt_file_prompt": "a blue dog and a red monkey", #self.prompt_provider_txt_file.get_current_prompt() if self.meta_input.get(akai_lpd8="C0", akai_midimix="A4", button_mode="pressed_once") else None,
