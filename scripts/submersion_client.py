@@ -14,6 +14,7 @@ import threading
 from dotenv import load_dotenv
 import os
 from rtd.utils.fft_analyzer import get_stream_analyzer  # Add import for FFT analyzer
+from collections import deque
 
 load_dotenv(override=True)
 
@@ -76,6 +77,12 @@ class SubmersionClient:
         self.zoom_factor_value = 1.0  # Starting at 1.0
         self.x_shift_value = 0.0     # Starting at 0.0
         self.y_shift_value = 0.0     # Starting at 0.0
+        
+        # Variables for frequency spectrum analysis
+        self.low_bin_baseline = deque(maxlen=30)  # stores last 30 values for rolling baseline
+        self.high_bin_baseline = deque(maxlen=30)  # stores last 30 values for rolling baseline
+        self.low_bin_sensitivity = 0.1  # How much low frequencies affect zoom out
+        self.high_bin_sensitivity = 0.1  # How much high frequencies affect zoom in
 
         # Connect to the server.
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -105,6 +112,70 @@ class SubmersionClient:
             return None
         msglen = struct.unpack("!I", raw_msglen)[0]
         return self.recvall(sock, msglen)
+        
+    def process_frequency_bins(self, binned_fft):
+        """
+        Process frequency bins to adjust zoom factor based on changes in low and high frequency bands.
+        
+        Args:
+            binned_fft: List containing the frequency bins (low, mid, high)
+            
+        Returns:
+            float: Adjusted zoom factor value
+        """
+        if not binned_fft or len(binned_fft) < 3:
+            return self.zoom_factor_value
+            
+        low_bin = binned_fft[0]
+        high_bin = binned_fft[2]
+        
+        # Update the rolling baselines
+        self.low_bin_baseline.append(low_bin)
+        self.high_bin_baseline.append(high_bin)
+        
+        # Calculate baseline averages (if we have enough data)
+        if len(self.low_bin_baseline) > 5 and len(self.high_bin_baseline) > 5:
+            low_baseline_avg = sum(self.low_bin_baseline) / len(self.low_bin_baseline)
+            high_baseline_avg = sum(self.high_bin_baseline) / len(self.high_bin_baseline)
+            
+            # Calculate delta from baseline as percentage changes
+            if low_baseline_avg > 0:
+                low_delta_pct = max(0, (low_bin - low_baseline_avg) / low_baseline_avg)
+            else:
+                low_delta_pct = 0
+                
+            if high_baseline_avg > 0:
+                high_delta_pct = max(0, (high_bin - high_baseline_avg) / high_baseline_avg)
+            else:
+                high_delta_pct = 0
+            
+            # Normalize deltas to a reasonable range for zoom factor adjustments (0.01-0.05 per frame)
+            # Cap percentage changes to avoid extreme reactions
+            low_delta_pct = min(low_delta_pct, 1.0)  # Cap at 100% increase
+            high_delta_pct = min(high_delta_pct, 1.0)  # Cap at 100% increase
+            
+            # Scale percentage changes to small increments appropriate for zoom
+            zoom_out_factor = low_delta_pct * self.low_bin_sensitivity
+            zoom_in_factor = high_delta_pct * self.high_bin_sensitivity
+            
+            # Apply adjustments to zoom factor
+            # High frequencies increase zoom (zoom in)
+            # Low frequencies decrease zoom (zoom out)
+            zoom_adjustment = zoom_in_factor - zoom_out_factor
+            
+            # Apply adjustment to zoom factor with bounds
+            new_zoom = self.zoom_factor_value + zoom_adjustment
+            
+            # Keep within reasonable bounds (0.8 to 1.5)
+            new_zoom = max(0.8, min(1.5, new_zoom))
+            
+            # Print some debug info occasionally
+            print(f"Frequency bins - Low: {low_bin:.2f} (Δ%: {low_delta_pct:.2f}), High: {high_bin:.2f} (Δ%: {high_delta_pct:.2f})")
+            print(f"Zoom adjustment: {zoom_adjustment:.4f}, New zoom: {new_zoom:.2f}")
+            
+            return new_zoom
+            
+        return self.zoom_factor_value  # Return current value if not enough baseline data
 
     def network_loop(self):
         """Asynchronous thread for sending camera images to the server and receiving img_diffusion."""
@@ -116,11 +187,11 @@ class SubmersionClient:
                 # Get FFT audio features
                 raw_fftx, raw_fft, binned_fftx, binned_fft = self.fft_analyzer.get_audio_features()
                 
-                # Update incrementing values
-                self.zoom_factor_value += 0.01
-                if self.zoom_factor_value > 1.5:  # Reset if exceeds upper limit
-                    self.zoom_factor_value = 0.8
-                    
+                # Process frequency bins to adjust zoom factor based on audio
+                if binned_fft is not None and hasattr(binned_fft, 'tolist'):
+                    self.zoom_factor_value = self.process_frequency_bins(binned_fft.tolist())
+                
+                # # Update incrementing values for x_shift and y_shift
                 # self.x_shift_value += 0.1
                 # if self.x_shift_value > 5.0:  # Reset if exceeds upper limit
                 #     self.x_shift_value = -1.0
