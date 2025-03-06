@@ -49,6 +49,7 @@ class SimpleDiffusionEngine:
         use_lightning=False,
         use_loras=False,
         lora_configs=None,
+        lora_scale=1.0, # Default LoRA scale
     ):
         self._init_resolution(height_diffusion_desired, width_diffusion_desired)
         self.do_compile = do_compile
@@ -72,6 +73,7 @@ class SimpleDiffusionEngine:
         
         # LoRA configuration
         self.use_loras = use_loras
+        self.lora_scale = lora_scale
 
         # Load LoRA configurations if provided
         self.lora_configs = lora_configs
@@ -190,7 +192,7 @@ class SimpleDiffusionEngine:
         self.pipe = pipe
         self.set_latents()
         
-    def _load_and_fuse_loras(self, pipe):
+    def _load_and_fuse_loras(self, pipe: StableDiffusionXLImg2ImgPipeline):
         """
         Helper method to load and fuse multiple LoRAs according to the configurations
         
@@ -223,7 +225,7 @@ class SimpleDiffusionEngine:
         if adapter_names:
             pipe.set_adapters(adapter_names, adapter_weights=adapter_weights)
             # Fuse all LoRAs
-            pipe.fuse_lora(adapter_names=adapter_names)
+            pipe.fuse_lora(adapter_names=adapter_names, lora_scale=self.lora_scale)
             # Unload weights to free memory
             pipe.unload_lora_weights()
             
