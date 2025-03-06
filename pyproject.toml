@@ -29,6 +29,7 @@ dependencies = [
   "xformers>=0.0.29.post1",
   "python-dotenv>=1.0.1",
   "stable-fast>=1.0.5",
+  "peft>=0.14.0",
 ]
 
 [tool.setuptools.packages.find]

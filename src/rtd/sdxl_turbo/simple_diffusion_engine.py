@@ -47,6 +47,8 @@ class SimpleDiffusionEngine:
         do_compile=False,
         do_diffusion=True,
         use_lightning=False,
+        use_loras=False,
+        lora_configs=None,
     ):
         self._init_resolution(height_diffusion_desired, width_diffusion_desired)
         self.do_compile = do_compile
@@ -67,6 +69,12 @@ class SimpleDiffusionEngine:
         self.embeds = None
         self.image_init = None
         self.modulations = {}
+        
+        # LoRA configuration
+        self.use_loras = use_loras
+
+        # Load LoRA configurations if provided
+        self.lora_configs = lora_configs
         
         torch.set_grad_enabled(False)
         torch.backends.cuda.matmul.allow_tf32 = False
@@ -136,7 +144,7 @@ class SimpleDiffusionEngine:
         pipe = StableDiffusionXLImg2ImgPipeline.from_pretrained(**kwargs)
         self._init_pipe(pipe)
 
-    def _init_pipe(self, pipe):
+    def _init_pipe(self, pipe: StableDiffusionXLImg2ImgPipeline):
         pipe.to(self.device)
         pipe.set_progress_bar_config(disable=True)
 
@@ -161,6 +169,10 @@ class SimpleDiffusionEngine:
             )
             pipe.vae = pipe.vae.to(self.device)
 
+        # Load and fuse LoRAs if enabled
+        if self.use_loras:
+            self._load_and_fuse_loras(pipe)
+
         # Apply compilation if needed
         if self.do_compile:
             pipe.enable_xformers_memory_efficient_attention()
@@ -177,6 +189,60 @@ class SimpleDiffusionEngine:
         
         self.pipe = pipe
         self.set_latents()
+        
+    def _load_and_fuse_loras(self, pipe):
+        """
+        Helper method to load and fuse multiple LoRAs according to the configurations
+        
+        Args:
+            pipe: The diffusion pipeline to which LoRAs will be applied
+        """
+        if not self.lora_configs or len(self.lora_configs) == 0:
+            return
+            
+        adapter_names = []
+        adapter_weights = []
+        
+        # Load all configured LoRAs
+        for config in self.lora_configs:
+            repo_id = config["repo_id"]
+            weight_name = config.get("weight_name", None)  # Optional
+            adapter_name = config["adapter_name"]
+            weight = config.get("weight", 1.0)  # Default weight is 1.0
+            
+            # Load the LoRA weights
+            if weight_name:
+                pipe.load_lora_weights(repo_id, weight_name=weight_name, adapter_name=adapter_name)
+            else:
+                pipe.load_lora_weights(repo_id, adapter_name=adapter_name)
+                
+            adapter_names.append(adapter_name)
+            adapter_weights.append(float(weight))
+        
+        # Set all adapters with their respective weights
+        if adapter_names:
+            pipe.set_adapters(adapter_names, adapter_weights=adapter_weights)
+            # Fuse all LoRAs
+            pipe.fuse_lora(adapter_names=adapter_names)
+            # Unload weights to free memory
+            pipe.unload_lora_weights()
+            
+    def set_lora_config(self, lora_configs, enable=True):
+        """
+        Update LoRA configurations and optionally enable/disable LoRA usage
+        
+        Args:
+            lora_configs: List of dictionaries with LoRA configurations
+            enable: Whether to enable LoRA usage
+        """
+        self.lora_configs = lora_configs
+        self.use_loras = enable
+        
+        # Reload the pipe if it already exists to apply new LoRA settings
+        if hasattr(self, 'pipe'):
+            if self.use_loras:
+                self._load_and_fuse_loras(self.pipe)
+            # Note: If disabling LoRAs, current LoRAs remain fused until pipe is reinitialized
 
     def set_latents(self, latents=None):
         if latents is None:

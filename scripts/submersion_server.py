@@ -72,6 +72,15 @@ class SubmersionServer:
             # self.opt_flow_estimator = OpticalFlowEstimator(use_ema=False)
             # self.posteffect_processor = Posteffect()
 
+            lora_configs = [
+                {
+                    "repo_id": "lordjia/by-feng-zikai",
+                    "weight_name": "fengzikai_v1.0_XL.safetensors", 
+                    "adapter_name": "feng",
+                    "weight": 1.0
+                }
+            ]
+
             self.de_img = SimpleDiffusionEngine(
                 # hf_model="sd-community/sdxl-flash",
                 use_image2image=True,
@@ -81,6 +90,8 @@ class SubmersionServer:
                 do_diffusion=self.do_diffusion,
                 device=device,
                 use_lightning=True,
+                use_loras=True,
+                lora_configs=lora_configs,
             )
 
             self.de_img.set_guidance_scale(0.0) #Flash - 1.2
