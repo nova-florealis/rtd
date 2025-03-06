@@ -73,24 +73,24 @@ class SubmersionServer:
             # self.posteffect_processor = Posteffect()
 
             lora_configs = [
-                {
-                    "repo_id": "latent-consistency/lcm-lora-sdxl",
-                    "weight_name": "pytorch_lora_weights.safetensors", 
-                    "adapter_name": "lora",
-                    "weight": 1.0
-                },
+                # {
+                #     "repo_id": "latent-consistency/lcm-lora-sdxl",
+                #     "weight_name": "pytorch_lora_weights.safetensors", 
+                #     "adapter_name": "lora",
+                #     "weight": 1.0
+                # },
                 # {
                 #     "repo_id": "nerijs/pixel-art-xl",
                 #     "weight_name": "pixel-art-xl.safetensors", 
                 #     "adapter_name": "pixel",
                 #     "weight": 1.2
                 # },
-                # {
-                #     "repo_id": "lordjia/by-feng-zikai",
-                #     "weight_name": "fengzikai_v1.0_XL.safetensors", 
-                #     "adapter_name": "feng",
-                #     "weight": 1.0
-                # }
+                {
+                    "repo_id": "lordjia/by-feng-zikai",
+                    "weight_name": "fengzikai_v1.0_XL.safetensors", 
+                    "adapter_name": "feng",
+                    "weight": 1.0
+                }
             ]
 
             self.de_img = SimpleDiffusionEngine(
