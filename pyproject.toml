@@ -14,8 +14,6 @@ dependencies = [
   "huggingface_hub",
   "diffusers",
   "tokenizers",
-  "lunar_tools @ git+https://github.com/lunarring/lunar_tools",
-  "tac @ git+https://github.com/lunarring/tac",
   "transformers",
   "timm",
   "torch",
@@ -23,12 +21,12 @@ dependencies = [
   "accelerate",
   "numpy",
   "sounddevice",
-  "spatial-correlation-sampler==0.5.0",
   "openai>=1.6.1",
   "ultralytics>=8.3.81",
   "xformers>=0.0.29.post1",
   "python-dotenv>=1.0.1",
-  "stable-fast>=1.0.5",
+  "lunar_tools @ git+https://github.com/lunarring/lunar_tools",
+  "tac @ git+https://github.com/lunarring/tac",
   "pyaudio>=0.2.14",
 ]
 

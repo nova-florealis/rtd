@@ -20,8 +20,8 @@ load_dotenv(override=True)
 
 from rtd.utils.input_image import InputImageProcessor, AcidProcessor
 from rtd.utils.compression_helpers import send_compressed, recv_compressed
-from rtd.utils.optical_flow import OpticalFlowEstimator
-from rtd.utils.posteffect import Posteffect
+# from rtd.utils.optical_flow import OpticalFlowEstimator
+# from rtd.utils.posteffect import Posteffect
 
 import random
 
@@ -36,10 +36,10 @@ class SubmersionClient:
         self.server_port = server_port
 
         # Camera settings.
-        self.shape_hw_cam = (512, 512)
+        self.shape_hw_cam = (1024, 1024)
         # Renderer settings.
-        self.width_render = 512
-        self.height_render = 512
+        self.width_render = 1024
+        self.height_render = 1024
         self.do_fullscreen = True
 
         # Initialize LT camera, meta input, and renderer.
@@ -64,9 +64,9 @@ class SubmersionClient:
         self.fft_analyzer = get_stream_analyzer()
 
         # Initialize local processors for optical flow and posteffect processing.
-        self.opt_flow_estimator = OpticalFlowEstimator(use_ema=False)
-        self.posteffect_processor = Posteffect()
-        self.input_image_processor = InputImageProcessor()  # For computing human segmentation locally.
+        # self.opt_flow_estimator = OpticalFlowEstimator(use_ema=False)
+        # self.posteffect_processor = Posteffect()
+        self.input_image_processor = InputImageProcessor(do_human_seg=False)  # For computing human segmentation locally.
 
         # Shared variables for asynchronous networking.
         self.network_lock = threading.Lock()
@@ -222,7 +222,7 @@ class SubmersionClient:
 
                 payload = {
                     "do_human_seg": self.meta_input.get(akai_lpd8="B1", akai_midimix="E3", button_mode="toggle", val_default=False),
-                    "acid_strength": self.meta_input.get(akai_lpd8="E0", akai_midimix="C0", val_min=0, val_max=1.0, val_default=0.4),
+                    "acid_strength": self.meta_input.get(akai_lpd8="E0", akai_midimix="C0", val_min=0, val_max=1.0, val_default=0.45),
                     "acid_strength_foreground": self.meta_input.get(akai_lpd8="E1", akai_midimix="C1", val_min=0, val_max=1.0, val_default=0.4),
                     "coef_noise": self.meta_input.get(akai_lpd8="F0", akai_midimix="C2", val_min=0, val_max=0.3, val_default=0.05),
                     "zoom_factor": self.meta_input.get(akai_lpd8="F1", akai_midimix="H2", val_min=0.5, val_max=1.5, val_default=self.zoom_factor_value),
@@ -302,8 +302,8 @@ class SubmersionClient:
                 human_seg_mask = np.ones_like(img_proc, dtype=np.float32) / 255
 
             self.fps_tracker.start_segment("Optical Flow")
-            # opt_flow = None
-            opt_flow = self.opt_flow_estimator.get_optflow(img_cam.copy(), low_pass_kernel_size=55, window_length=55)
+            opt_flow = None
+            # opt_flow = self.opt_flow_estimator.get_optflow(img_cam.copy(), low_pass_kernel_size=55, window_length=55)
 
             with self.network_lock:
                 remote_diff = self.latest_remote_diffusion.copy() if self.latest_remote_diffusion is not None else None

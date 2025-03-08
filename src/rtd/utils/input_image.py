@@ -156,14 +156,17 @@ class InputImageProcessor:
 
         #  image colorization model for infrared images
         self.infrared_colorizer = ImageColorizationPipelineHF()
+        self.do_human_seg = do_human_seg
 
         # human body segmentation
-        self.human_seg = HumanSeg(
-            resizing_factor=self.resizing_factor_humanseg, device=device, apply_smoothing=True, gaussian_kernel_size=9, gaussian_sigma=3
-        )
+        if self.do_human_seg:
+            self.human_seg = HumanSeg(
+                resizing_factor=self.resizing_factor_humanseg, device=device, apply_smoothing=True, gaussian_kernel_size=9, gaussian_sigma=3
+            )
+        else:
+            self.human_seg = None
         self.set_blur_size(self.blur_kernel)
 
-        self.do_human_seg = do_human_seg
         self.do_infrared_colorize = do_infrared_colorize
         self.do_blur = do_blur
         self.flip_axis = None
